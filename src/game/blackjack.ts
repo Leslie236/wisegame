@@ -32,10 +32,10 @@ export function createDeck(): Card[] {
   }
   return deck
 }
-export function payout(player: Card[], dealer: Card[], bet: number) {
+export function payout(player: Card[], dealer: Card[], bet: number, allowBlackjack = true) {
   const p = score(player),
     d = score(dealer)
-  const pb = p === 21 && player.length === 2,
+  const pb = allowBlackjack && p === 21 && player.length === 2,
     db = d === 21 && dealer.length === 2
   if (p > 21) return 0
   if (pb && !db) return bet * 2.5

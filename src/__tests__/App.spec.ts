@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import App from '../App.vue'
+import * as blackjack from '../game/blackjack'
 import { score, payout, createDeck, type Card } from '../game/blackjack'
 const hand = (...ranks: string[]): Card[] => ranks.map((rank) => ({ rank, suit: '♠' }))
 describe('blackjack rules', () => {
@@ -54,5 +55,75 @@ describe('game interface', () => {
     }
     expect(wrapper.get('.controls > .primary').text()).toContain('再来一局')
     expect(wrapper.find('.dealer-area .back').exists()).toBe(false)
+  })
+})
+
+describe('split and surrender', () => {
+  beforeEach(() => window.localStorage.clear())
+  afterEach(() => vi.restoreAllMocks())
+  function deal(...ranks: string[]) {
+    vi.spyOn(blackjack, 'createDeck').mockReturnValue(hand(...ranks).reverse())
+    return mount(App)
+  }
+  it('surrenders the untouched hand and returns half the bet', async () => {
+    const wrapper = deal('10', '6', '10', '7')
+    await wrapper.get('.controls > .primary').trigger('click')
+    await wrapper.get('.surrender-button').trigger('click')
+    expect(wrapper.get('.balance').text()).toContain('975')
+    expect(wrapper.get('.status').text()).toContain('退回一半')
+    expect(wrapper.get('.surrender-button').attributes('disabled')).toBeDefined()
+  })
+  it('settles split hands independently and only draws dealer cards after both hands finish', async () => {
+    const wrapper = deal('8', '8', '10', '7', '10', '2', '9')
+    await wrapper.get('.controls > .primary').trigger('click')
+    await wrapper.get('.split-button').trigger('click')
+    expect(wrapper.findAll('.player-area')).toHaveLength(2)
+    expect(wrapper.get('.balance').text()).toContain('900')
+    expect(wrapper.get('.surrender-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.split-button').attributes('disabled')).toBeDefined()
+    await wrapper.get('.secondary').trigger('click')
+    expect(wrapper.findAll('.active-hand')[0]!.text()).toContain('第 2 手')
+    expect(wrapper.find('.dealer-area .back').exists()).toBe(true)
+    await wrapper.get('.action-row .primary').trigger('click')
+    await wrapper.get('.secondary').trigger('click')
+    expect(wrapper.get('.balance').text()).toContain('1,100')
+    expect(wrapper.find('.dealer-area .back').exists()).toBe(false)
+  })
+  it('splits aces with one draw each and pays ordinary 21 instead of blackjack', async () => {
+    const wrapper = deal('A', 'A', '10', '9', 'K', '8')
+    await wrapper.get('.controls > .primary').trigger('click')
+    await wrapper.get('.split-button').trigger('click')
+    expect(wrapper.get('.balance').text()).toContain('1,050')
+    expect(wrapper.find('.action-row').exists()).toBe(false)
+    expect(wrapper.findAll('.player-area .card')).toHaveLength(4)
+  })
+  it('allows doubling one split hand without changing the other bet', async () => {
+    const wrapper = deal('8', '8', '10', '7', '3', '10', '10')
+    await wrapper.get('.controls > .primary').trigger('click')
+    await wrapper.get('.split-button').trigger('click')
+    await wrapper.get('.controls > .double-button').trigger('click')
+    expect(wrapper.get('.balance').text()).toContain('850')
+    await wrapper.get('.secondary').trigger('click')
+    expect(wrapper.get('.balance').text()).toContain('1,150')
+    expect(wrapper.findAll('.hand-summary').map((node) => node.text())).toEqual([
+      '下注 100 · +100 筹码',
+      '下注 50 · +50 筹码',
+    ])
+  })
+  it('disables surrender after hitting and split without enough chips', async () => {
+    const wrapper = deal('8', '8', '10', '7', '2')
+    window.localStorage.setItem('wise21-balance', '50')
+    wrapper.unmount()
+    const limited = mount(App)
+    await limited.get('.controls > .primary').trigger('click')
+    expect(limited.get('.split-button').attributes('disabled')).toBeDefined()
+    await limited.get('.action-row .primary').trigger('click')
+    expect(limited.get('.surrender-button').attributes('disabled')).toBeDefined()
+  })
+  it('does not allow surrender against dealer blackjack', async () => {
+    const wrapper = deal('8', '8', 'A', 'K')
+    await wrapper.get('.controls > .primary').trigger('click')
+    expect(wrapper.get('.balance').text()).toContain('950')
+    expect(wrapper.get('.surrender-button').attributes('disabled')).toBeDefined()
   })
 })

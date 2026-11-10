@@ -32,10 +32,26 @@ const savedBalance = Number(read('wise21-balance') ?? 1000)
 const balance = ref(Number.isFinite(savedBalance) && savedBalance >= 0 ? savedBalance : 1000)
 watch(balance, (value) => save('wise21-balance', String(value)))
 const bet = ref(50)
-const activeBet = ref(0)
+interface PlayerHand {
+  cards: Card[]
+  bet: number
+  done: boolean
+  surrendered: boolean
+  split: boolean
+  returned: number
+}
+const hands = ref<PlayerHand[]>([])
+const displayedHands = computed<PlayerHand[]>(() =>
+  hands.value.length
+    ? hands.value
+    : [{ cards: [], bet: 0, done: false, surrendered: false, split: false, returned: 0 }],
+)
+const activeIndex = ref(0)
+const currentHand = computed(() => hands.value[activeIndex.value])
+const activeBet = computed(() => hands.value.reduce((sum, hand) => sum + hand.bet, 0))
 const phase = ref<'ready' | 'playing' | 'done'>('ready')
-const player = ref<Card[]>([]),
-  dealer = ref<Card[]>([])
+const player = computed(() => currentHand.value?.cards ?? [])
+const dealer = ref<Card[]>([])
 let deck: Card[] = []
 const message = ref('好牌，从这一手开始。')
 const detail = ref('选择筹码，开启你的第一局。')
@@ -70,60 +86,140 @@ const dealerScore = computed(() =>
   score(phase.value === 'playing' ? dealer.value.slice(0, 1) : dealer.value),
 )
 const canDouble = computed(
-  () => phase.value === 'playing' && player.value.length === 2 && balance.value >= activeBet.value,
+  () =>
+    phase.value === 'playing' &&
+    player.value.length === 2 &&
+    !!currentHand.value &&
+    balance.value >= currentHand.value.bet,
+)
+const canSplit = computed(
+  () =>
+    phase.value === 'playing' &&
+    hands.value.length === 1 &&
+    player.value.length === 2 &&
+    score([player.value[0]!]) === score([player.value[1]!]) &&
+    balance.value >= currentHand.value!.bet,
+)
+const canSurrender = computed(
+  () => phase.value === 'playing' && hands.value.length === 1 && player.value.length === 2,
 )
 function draw() {
   return deck.pop()!
 }
 function finish() {
-  const returned = payout(player.value, dealer.value, activeBet.value)
+  let returned = 0
+  for (const hand of hands.value) {
+    hand.done = true
+    hand.returned = hand.surrendered
+      ? hand.bet / 2
+      : payout(hand.cards, dealer.value, hand.bet, !hand.split)
+    returned += hand.returned
+  }
   const profit = returned - activeBet.value
   balance.value += returned
   phase.value = 'done'
   rounds.value++
   if (profit > 0) wins.value++
-  message.value =
-    playerScore.value > 21
-      ? '爆牌了，下手再来。'
-      : profit > 0
-        ? player.value.length === 2 && playerScore.value === 21
-          ? 'BLACKJACK！漂亮的一手。'
-          : '这一手，你赢了。'
-        : profit === 0
-          ? '势均力敌，平局。'
-          : '庄家赢了，机会还在。'
+  message.value = hands.value[0]?.surrendered
+    ? '已投降，退回一半下注。'
+    : hands.value.length > 1
+      ? '两手牌均已结算。'
+      : playerScore.value > 21
+        ? '爆牌了，下手再来。'
+        : profit > 0
+          ? player.value.length === 2 && playerScore.value === 21
+            ? 'BLACKJACK！漂亮的一手。'
+            : '这一手，你赢了。'
+          : profit === 0
+            ? '势均力敌，平局。'
+            : '庄家赢了，机会还在。'
   detail.value = `${profit > 0 ? '+' : ''}${profit} 筹码 · ${profit === 0 ? '下注已退回' : '本局已结算'}`
 }
 function start() {
   if (phase.value === 'playing' || balance.value < bet.value) return
   deck = createDeck()
-  activeBet.value = bet.value
-  balance.value -= activeBet.value
-  player.value = [draw(), draw()]
+  balance.value -= bet.value
+  hands.value = [
+    {
+      cards: [draw(), draw()],
+      bet: bet.value,
+      done: false,
+      surrendered: false,
+      split: false,
+      returned: 0,
+    },
+  ]
+  activeIndex.value = 0
   dealer.value = [draw(), draw()]
   phase.value = 'playing'
   message.value = '轮到你了。'
   detail.value = '再来一张，还是见好就收？'
   if (score(player.value) === 21 || score(dealer.value) === 21) finish()
 }
+function advance() {
+  const next = hands.value.findIndex((hand) => !hand.done)
+  if (next >= 0) {
+    activeIndex.value = next
+    message.value = `轮到第 ${next + 1} 手。`
+    detail.value = `本手下注 ${currentHand.value!.bet} 筹码 · 每手独立结算`
+    return
+  }
+  if (hands.value.some((hand) => !hand.surrendered && score(hand.cards) <= 21)) {
+    while (score(dealer.value) < 17) dealer.value.push(draw())
+  }
+  finish()
+}
 function hit() {
   if (phase.value !== 'playing') return
   player.value.push(draw())
-  if (playerScore.value > 21) finish()
-  else if (playerScore.value === 21) stand()
+  if (playerScore.value >= 21) {
+    currentHand.value!.done = true
+    advance()
+  }
 }
 function stand() {
   if (phase.value !== 'playing') return
-  while (score(dealer.value) < 17) dealer.value.push(draw())
-  finish()
+  currentHand.value!.done = true
+  advance()
 }
 function double() {
   if (!canDouble.value) return
-  balance.value -= activeBet.value
-  activeBet.value *= 2
-  player.value.push(draw())
-  if (playerScore.value > 21) finish()
-  else stand()
+  const hand = currentHand.value!
+  balance.value -= hand.bet
+  hand.bet *= 2
+  hand.cards.push(draw())
+  hand.done = true
+  advance()
+}
+function split() {
+  if (!canSplit.value) return
+  const original = currentHand.value!
+  balance.value -= original.bet
+  const aces = original.cards[0]!.rank === 'A'
+  hands.value = original.cards.map((card) => {
+    const cards = [card, draw()]
+    return {
+      cards,
+      bet: original.bet,
+      done: aces || score(cards) === 21,
+      surrendered: false,
+      split: true,
+      returned: 0,
+    }
+  })
+  advance()
+}
+function surrender() {
+  if (!canSurrender.value) return
+  currentHand.value!.surrendered = true
+  finish()
+}
+function handStatus(hand: PlayerHand) {
+  if (phase.value === 'done') {
+    const profit = hand.returned - hand.bet
+    return hand.surrendered ? '投降 · 退回一半' : `${profit > 0 ? '+' : ''}${profit} 筹码`
+  }
+  return score(hand.cards) > 21 ? '爆牌' : hand.done ? '已停牌' : '等待操作'
 }
 function refill() {
   if (phase.value === 'playing') return
@@ -221,33 +317,49 @@ function refill() {
             </div>
             <span class="line"></span>
           </div>
-          <div class="hand-area player-area">
-            <div class="cards">
-              <template v-if="player.length"
-                ><div
-                  v-for="(card, index) in player"
-                  :key="index"
-                  class="card"
-                  :class="{ red: card.suit === '♥' || card.suit === '♦' }"
-                  :aria-label="card.rank + card.suit"
-                >
-                  <span class="corner"
-                    >{{ card.rank }}<small>{{ card.suit }}</small></span
-                  ><span class="suit">{{ card.suit }}</span
-                  ><span class="corner bottom"
-                    >{{ card.rank }}<small>{{ card.suit }}</small></span
+          <div class="player-hands" :class="{ 'is-split': hands.length > 1 }">
+            <div
+              v-for="(hand, handIndex) in displayedHands"
+              :key="handIndex"
+              class="hand-area player-area"
+              :class="{ 'active-hand': phase === 'playing' && activeIndex === handIndex }"
+            >
+              <div class="hand-label">
+                {{ hands.length > 1 ? `第 ${handIndex + 1} 手` : '你的手牌' }}
+                <span class="score" :class="{ bust: score(hand.cards) > 21 }">{{
+                  hand.cards.length ? score(hand.cards) : '—'
+                }}</span>
+              </div>
+              <div class="cards">
+                <template v-if="hand.cards.length"
+                  ><div
+                    v-for="(card, index) in hand.cards"
+                    :key="index"
+                    class="card"
+                    :class="{ red: card.suit === '♥' || card.suit === '♦' }"
+                    :aria-label="card.rank + card.suit"
                   >
-                </div></template
-              ><template v-else
-                ><div class="card empty">♠</div>
-                <div class="card empty">♠</div></template
-              >
-            </div>
-            <div class="hand-label">
-              你的手牌
-              <span class="score" :class="{ bust: playerScore > 21 }">{{
-                player.length ? playerScore : '—'
-              }}</span>
+                    <span class="corner"
+                      >{{ card.rank }}<small>{{ card.suit }}</small></span
+                    ><span class="suit">{{ card.suit }}</span
+                    ><span class="corner bottom"
+                      >{{ card.rank }}<small>{{ card.suit }}</small></span
+                    >
+                  </div></template
+                >
+                <template v-else
+                  ><div class="card empty">♠</div>
+                  <div class="card empty">♠</div></template
+                >
+              </div>
+              <div v-if="hand.cards.length" class="hand-summary">
+                下注 {{ hand.bet }} ·
+                {{
+                  phase === 'playing' && activeIndex === handIndex && !hand.done
+                    ? '正在操作'
+                    : handStatus(hand)
+                }}
+              </div>
             </div>
           </div>
           <div class="table-bottom"><span>放轻松，好好玩。</span><span>仅限虚拟筹码</span></div>
@@ -301,6 +413,24 @@ function refill() {
                 加倍下注 <span>仅再拿一张牌</span>
               </button></template
             >
+            <div class="extra-actions">
+              <button
+                class="double-button split-button"
+                :disabled="!canSplit"
+                title="起手两张同点数牌且筹码足够时可分牌，每局限分一次"
+                @click="split"
+              >
+                分牌 <span>追加等额下注</span>
+              </button>
+              <button
+                class="double-button surrender-button"
+                :disabled="!canSurrender"
+                title="未分牌且起手尚未要牌或加倍时可投降"
+                @click="surrender"
+              >
+                投降 <span>退回一半下注</span>
+              </button>
+            </div>
             <p v-if="balance < bet && phase !== 'playing'" class="low-balance">
               筹码不足，请降低下注或重置筹码。
             </p>
@@ -359,11 +489,22 @@ function refill() {
             <strong>要牌</strong>再拿一张，<strong>停牌</strong>让庄家亮牌；庄家低于 17
             点必须要牌，软 17 也停牌。
           </li>
+          <li>
+            <strong>分牌</strong
+            >：起手两张同点数牌时，追加等额下注拆为两手，依次操作、独立结算。每局限分一次，分牌后可加倍；分
+            A 每手只补一张牌。
+          </li>
+          <li>
+            <strong>投降</strong>：庄家检查 Blackjack
+            后，未分牌且起手尚未要牌或加倍时可放弃，退回一半下注。
+          </li>
           <li><strong>加倍</strong>仅限起手两张且筹码足够时：追加等额下注，只再拿一张牌。</li>
           <li>
             普通获胜净赢 1 倍下注；起手 A ＋ 10 点牌为 Blackjack，净赢 1.5 倍；同点数退回下注。
           </li>
-          <li>天生 Blackjack 胜过多张牌组成的 21 点。本桌不提供分牌、保险和投降。</li>
+          <li>
+            天生 Blackjack 胜过多张牌组成的 21 点。分牌后的 21 点按普通获胜赔付。本桌不提供保险。
+          </li>
         </ul>
         <p class="modal-note">
           纯娱乐小游戏，所有筹码均为虚拟筹码。主题和筹码余额会自动保存在当前浏览器，局数统计仅限本次打开。
@@ -1272,6 +1413,70 @@ footer strong {
   *:after {
     animation: none !important;
     transition: none !important;
+  }
+}
+</style>
+
+<style scoped>
+.player-hands {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+.player-hands .player-area {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 10px 4px;
+}
+.player-hands.is-split .active-hand {
+  border-color: var(--accent);
+  background: #ffffff08;
+}
+.hand-summary {
+  font-size: 10px;
+  color: var(--table-muted);
+}
+.extra-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.extra-actions .double-button {
+  flex-direction: column;
+  gap: 5px;
+}
+.is-split .card {
+  width: 66px;
+  height: 96px;
+}
+.is-split .cards {
+  min-height: 96px;
+}
+@media (max-width: 720px) {
+  .player-hands {
+    gap: 6px;
+  }
+  .is-split .card {
+    width: 55px;
+    height: 83px;
+  }
+  .is-split .suit {
+    font-size: 28px;
+  }
+  .is-split .corner {
+    font-size: 13px;
+  }
+  .is-split .corner small {
+    font-size: 10px;
+  }
+  .is-split .cards {
+    gap: 5px;
+    min-height: 83px;
   }
 }
 </style>
