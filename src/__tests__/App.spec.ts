@@ -1,9 +1,31 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
+import { mount, flushPromises } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import App from '../App.vue'
-import * as blackjack from '../game/blackjack'
-import { score, payout, createDeck, type Card } from '../game/blackjack'
+import BlackjackView from '../views/BlackjackView.vue'
+import PokerView from '../views/PokerView.vue'
+import * as cards from '../game/cards'
+import { createDeck, type Card } from '../game/cards'
+import { score, payout } from '../game/blackjack'
+
 const hand = (...ranks: string[]): Card[] => ranks.map((rank) => ({ rank, suit: '♠' }))
+
+async function mountApp() {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', name: 'blackjack', component: BlackjackView },
+      { path: '/poker', name: 'poker', component: PokerView },
+    ],
+  })
+  await router.push('/')
+  await router.isReady()
+  const wrapper = mount(App, { global: { plugins: [router] } })
+  await nextTick()
+  return { wrapper, router }
+}
+
 describe('blackjack rules', () => {
   it('adjusts multiple aces without busting', () => {
     expect(score(hand('A', 'A', '9'))).toBe(21)
@@ -22,10 +44,13 @@ describe('blackjack rules', () => {
     expect(new Set(deck.map((c) => c.rank + c.suit)).size).toBe(52)
   })
 })
+
 describe('game interface', () => {
   beforeEach(() => window.localStorage.clear())
+  afterEach(() => vi.restoreAllMocks())
+
   it('persists all four themes without disturbing the game', async () => {
-    const wrapper = mount(App)
+    const { wrapper } = await mountApp()
     expect(wrapper.get('.app').attributes('data-theme')).toBe('charcoal')
     for (const [name, id] of [
       ['午夜蓝', 'midnight'],
@@ -40,21 +65,37 @@ describe('game interface', () => {
     expect(wrapper.get('.balance').text()).toContain('1,000')
     await wrapper.get('button[aria-label="午夜蓝"]').trigger('click')
     wrapper.unmount()
-    const reopened = mount(App)
+    const { wrapper: reopened } = await mountApp()
     expect(reopened.get('.app').attributes('data-theme')).toBe('midnight')
     reopened.unmount()
   })
+
   it('deals and prevents changing bets while playing', async () => {
-    const wrapper = mount(App)
+    vi.spyOn(cards, 'createDeck').mockReturnValue(hand('10', '6', '10', '7', '2').reverse())
+    const wrapper = mount(BlackjackView)
     await wrapper.get('.controls > .primary').trigger('click')
     expect(wrapper.findAll('.player-area .card')).toHaveLength(2)
     expect(wrapper.findAll('.dealer-area .card')).toHaveLength(2)
-    if (wrapper.find('.action-row').exists()) {
-      expect(wrapper.get('.chips button').attributes('disabled')).toBeDefined()
-      await wrapper.get('.secondary').trigger('click')
-    }
+    expect(wrapper.get('.chips button').attributes('disabled')).toBeDefined()
+    await wrapper.get('.secondary').trigger('click')
     expect(wrapper.get('.controls > .primary').text()).toContain('再来一局')
     expect(wrapper.find('.dealer-area .back').exists()).toBe(false)
+  })
+
+  it('switches between the blackjack table and the poker room', async () => {
+    const { wrapper, router } = await mountApp()
+    expect(wrapper.find('.controls').exists()).toBe(true)
+
+    await wrapper.get('a[href="/poker"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('poker')
+    expect(wrapper.find('.poker-table').exists()).toBe(true)
+    expect(wrapper.get('.poker-controls').text()).toContain('开始新的一手')
+
+    await wrapper.get('a[href="/"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('blackjack')
+    expect(wrapper.find('.controls').exists()).toBe(true)
   })
 })
 
@@ -62,8 +103,8 @@ describe('split and surrender', () => {
   beforeEach(() => window.localStorage.clear())
   afterEach(() => vi.restoreAllMocks())
   function deal(...ranks: string[]) {
-    vi.spyOn(blackjack, 'createDeck').mockReturnValue(hand(...ranks).reverse())
-    return mount(App)
+    vi.spyOn(cards, 'createDeck').mockReturnValue(hand(...ranks).reverse())
+    return mount(BlackjackView)
   }
   it('surrenders the untouched hand and returns half the bet', async () => {
     const wrapper = deal('10', '6', '10', '7')
@@ -111,10 +152,11 @@ describe('split and surrender', () => {
     ])
   })
   it('disables surrender after hitting and split without enough chips', async () => {
-    const wrapper = deal('8', '8', '10', '7', '2')
+    vi.spyOn(cards, 'createDeck').mockReturnValue(hand('8', '8', '10', '7', '2').reverse())
+    const wrapper = mount(BlackjackView)
     window.localStorage.setItem('wise21-balance', '50')
     wrapper.unmount()
-    const limited = mount(App)
+    const limited = mount(BlackjackView)
     await limited.get('.controls > .primary').trigger('click')
     expect(limited.get('.split-button').attributes('disabled')).toBeDefined()
     await limited.get('.action-row .primary').trigger('click')

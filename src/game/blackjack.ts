@@ -1,7 +1,7 @@
-export interface Card {
-  rank: string
-  suit: string
-}
+import type { Card } from './cards'
+
+export type { Card } from './cards'
+
 export function score(cards: Card[]) {
   let total = 0,
     aces = 0
@@ -17,21 +17,7 @@ export function score(cards: Card[]) {
   }
   return total
 }
-export function createDeck(): Card[] {
-  const deck = ['♠', '♥', '♣', '♦'].flatMap((suit) =>
-    ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'].map((rank) => ({
-      rank,
-      suit,
-    })),
-  )
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const card = deck[i]!
-    deck[i] = deck[j]!
-    deck[j] = card
-  }
-  return deck
-}
+
 export function payout(player: Card[], dealer: Card[], bet: number, allowBlackjack = true) {
   const p = score(player),
     d = score(dealer)
