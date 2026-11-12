@@ -67,7 +67,13 @@ export function chooseAction(
   const pot = state.seats.reduce((sum, item) => sum + item.totalBet, 0)
   const strength = handStrength(seat.hole, state.board)
   const callAmount = legal.call?.amount ?? 0
-  const potOdds = callAmount > 0 ? callAmount / (pot + callAmount) : 0
+  // A short stack cannot win the unmatched part of an opponent's bet.
+  const contributionCap = seat.totalBet + callAmount
+  const callablePot = state.seats.reduce(
+    (sum, item) => sum + Math.min(item.totalBet, contributionCap),
+    0,
+  )
+  const potOdds = callAmount > 0 ? callAmount / (callablePot + callAmount) : 0
   const random = rng()
 
   if (legal.check) {
@@ -80,8 +86,26 @@ export function chooseAction(
     return { type: 'check' }
   }
 
-  const required = potOdds + (profile.tightness - 0.5) * 0.2
-  if (strength < required && callAmount < seat.stack) {
+  const styleAdjustment = (profile.tightness - 0.5) * 0.12
+  const stackFraction = callAmount / Math.max(seat.stack, 1)
+  const expensiveCall = callAmount >= state.bigBlind * 5
+  // Hand strength is a heuristic, not equity. Large commitments need a
+  // separate quality floor even when the displayed pot odds look attractive.
+  const pressureFloor = expensiveCall
+    ? state.street === 'preflop'
+      ? stackFraction >= 0.75
+        ? 0.84
+        : stackFraction >= 0.4
+          ? 0.72
+          : 0.58
+      : stackFraction >= 0.75
+        ? 0.55
+        : stackFraction >= 0.4
+          ? 0.44
+          : 0.32
+    : 0
+  const required = Math.max(potOdds + styleAdjustment, pressureFloor + styleAdjustment)
+  if (strength < required) {
     return { type: 'fold' }
   }
 

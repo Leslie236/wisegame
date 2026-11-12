@@ -128,11 +128,19 @@ export function useHoldem(options: HoldemOptions = {}) {
     }
   }
 
-  function topUpAi(current: TableState): TableState {
+  let newcomerCount = 0
+
+  function replaceBustedAi(current: TableState): TableState {
     return {
       ...current,
       seats: current.seats.map((seat) =>
-        seat.isHero || seat.stack >= BIG_BLIND ? seat : { ...seat, stack: AI_STARTING_STACK },
+        seat.isHero || seat.stack > 0
+          ? seat
+          : {
+              ...seat,
+              name: `新玩家 ${++newcomerCount}`,
+              stack: 1000 + Math.floor(Math.random() * 4001),
+            },
       ),
     }
   }
@@ -140,14 +148,13 @@ export function useHoldem(options: HoldemOptions = {}) {
   function startNext() {
     if (inHand.value) return
     clearTimer()
-    const current = topUpAi(state.value)
-    if (current.seats[0]!.stack < BIG_BLIND) {
+    if (state.value.seats[0]!.stack < BIG_BLIND) {
       message.value = '筹码不足。'
       detail.value = '请先重新买入 1,000 筹码。'
       return
     }
     try {
-      state.value = startHand(current)
+      state.value = startHand(replaceBustedAi(state.value))
       syncMessage()
     } catch (error) {
       message.value = error instanceof Error ? error.message : '无法开始新的一手。'

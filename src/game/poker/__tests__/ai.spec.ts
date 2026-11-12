@@ -67,6 +67,49 @@ describe('bot decisions', () => {
     }
   })
 
+  function facingAllIn(stack = 1000): TableState {
+    const initial = table()
+    initial.seats[2]!.stack = stack
+    let state = startHand(initial)
+    state = applyAction(state, 3, { type: 'all-in' })
+    state = applyAction(state, 0, { type: 'fold' })
+    return applyAction(state, 1, { type: 'fold' })
+  }
+
+  it.each([600, 1000, 2000])('folds weak cards against a shove with a %s stack', (stack) => {
+    const state = facingAllIn(stack)
+    state.seats[2]!.hole = [c('7', '♠'), c('2', '♥')]
+    for (const profile of BOT_PROFILES) {
+      const action = chooseAction(state, 2, profile, () => 0.5)
+      expect(action.type).toBe('fold')
+      expect(() => applyAction(state, 2, action)).not.toThrow()
+    }
+  })
+
+  it('can call a shove with pocket aces', () => {
+    const state = facingAllIn()
+    state.seats[2]!.hole = [c('A', '♠'), c('A', '♥')]
+    for (const profile of BOT_PROFILES) {
+      const action = chooseAction(state, 2, profile, () => 0.5)
+      expect(action.type).toBe('call')
+      expect(() => applyAction(state, 2, action)).not.toThrow()
+    }
+  })
+
+  it('folds a weak made pair against a large postflop shove', () => {
+    const state = facingAllIn()
+    state.street = 'river'
+    state.board = [c('2', '♦'), c('9', '♣'), c('J', '♥'), c('K', '♠'), c('4', '♦')]
+    state.seats[2]!.hole = [c('7', '♠'), c('2', '♥')]
+    expect(chooseAction(state, 2, BOT_PROFILES[3]!, () => 0.5).type).toBe('fold')
+  })
+
+  it('still calls a cheap short-stack all-in when the pot odds justify it', () => {
+    const state = facingAllIn(30)
+    state.seats[2]!.hole = [c('A', '♠'), c('K', '♥')]
+    expect(chooseAction(state, 2, BOT_PROFILES[1]!, () => 0.5).type).toBe('call')
+  })
+
   it('folds a weak hand when facing a large bet', () => {
     let state = startHand(table())
     state = applyAction(state, 3, { type: 'raise', to: 200 })
