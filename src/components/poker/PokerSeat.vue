@@ -84,7 +84,7 @@ function cardInBest(card: Card): boolean {
       <span class="poker-seat__stack">{{ seat.stack.toLocaleString() }}</span>
     </div>
 
-    <div v-if="handLabel" class="poker-seat__hand">{{ handLabel }}</div>
+    <div v-if="handLabel" class="poker-seat__hand" aria-live="polite">{{ handLabel }}</div>
     <div v-if="seat.cheatSpent" class="poker-seat__hand">已换牌 · −{{ seat.cheatSpent }}</div>
     <div v-if="seat.streetBet > 0" class="poker-seat__bet">{{ seat.streetBet }}</div>
     <div v-if="actionLabel && !handLabel" class="poker-seat__action">{{ actionLabel }}</div>

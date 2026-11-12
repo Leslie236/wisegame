@@ -5,6 +5,7 @@ import PokerCard from '@/components/poker/PokerCard.vue'
 import PokerSeat from '@/components/poker/PokerSeat.vue'
 import type { Card } from '@/game/cards'
 import { buildPots } from '@/game/poker/pot'
+import { evaluate, rankValue } from '@/game/poker/evaluator'
 import type { TableState } from '@/game/poker/types'
 
 const props = defineProps<{
@@ -28,8 +29,32 @@ const revealed = computed(() => props.state.result?.revealed ?? false)
 const winnerIds = computed(
   () => new Set(props.state.result?.pots.flatMap((potResult) => potResult.winners) ?? []),
 )
+const currentHeroHand = computed(() => {
+  const hero = props.state.seats.find((seat) => seat.isHero)
+  if (
+    !hero ||
+    hero.hole.length !== 2 ||
+    hero.status === 'folded' ||
+    hero.status === 'out' ||
+    props.state.street === 'idle' ||
+    props.state.street === 'complete'
+  )
+    return null
+  const cards = [...hero.hole, ...props.state.board]
+  if (cards.length >= 5) return { seatId: hero.id, ...evaluate(cards) }
+  const sorted = [...hero.hole].sort((a, b) => rankValue(b.rank) - rankValue(a.rank))
+  const pair = sorted[0]!.rank === sorted[1]!.rank
+  return {
+    seatId: hero.id,
+    label: `${pair ? '一对' : '高牌'} · ${sorted[0]!.rank}`,
+    cards: pair ? sorted : sorted.slice(0, 1),
+  }
+})
 const bestCardsBySeat = computed(() => {
   const map = new Map<number, Card[]>()
+  if (currentHeroHand.value) {
+    map.set(currentHeroHand.value.seatId, currentHeroHand.value.cards)
+  }
   const result = props.state.result
   if (!result) return map
   for (const potResult of result.pots) {
@@ -50,6 +75,7 @@ const boardUsedKeys = computed(() => {
 const streetLabel = computed(() => STREET_LABELS[props.state.street] ?? '牌桌')
 
 function handLabel(seatId: number): string | undefined {
+  if (currentHeroHand.value?.seatId === seatId) return `当前最佳：${currentHeroHand.value.label}`
   return props.state.result?.hands[seatId]?.label
 }
 
@@ -105,7 +131,7 @@ const seatSlots = computed(() => [
           :key="`card-${index}`"
           :card="card"
           :highlight="isBoardBest(card)"
-          :dim="revealed && !isBoardUsed(card)"
+          :dim="currentHeroHand ? !isBoardBest(card) : revealed && !isBoardUsed(card)"
         />
         <PokerCard v-for="index in 5 - state.board.length" :key="`slot-${index}`" empty />
       </div>
