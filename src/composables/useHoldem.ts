@@ -4,6 +4,8 @@ import { STARTING_BALANCE, useWallet } from '@/composables/useWallet'
 import { BOT_PROFILES, chooseAction } from '@/game/poker/ai'
 import { applyAction, createTable, legalActions, startHand } from '@/game/poker/engine'
 import { buildPots } from '@/game/poker/pot'
+import { randomNpcName } from '@/game/poker/names'
+import { applyCheat, cheatAvailability } from '@/game/poker/cheats'
 import type { Action, LegalActions, TableState } from '@/game/poker/types'
 
 export const BIG_BLIND = 20
@@ -37,10 +39,15 @@ export function useHoldem(options: HoldemOptions = {}) {
   const { balance } = useWallet()
 
   function freshTable(): TableState {
+    const names = new Set(['你'])
     return createTable({
       seats: [
         { name: '你', isHero: true, stack: balance.value },
-        ...AI_PROFILES.map((profile) => ({ name: profile.name, stack: AI_STARTING_STACK })),
+        ...AI_PROFILES.map(() => {
+          const name = randomNpcName(names)
+          names.add(name)
+          return { name, stack: AI_STARTING_STACK }
+        }),
       ],
       startingStack: AI_STARTING_STACK,
       smallBlind: SMALL_BLIND,
@@ -56,6 +63,17 @@ export function useHoldem(options: HoldemOptions = {}) {
   let timer: ReturnType<typeof setTimeout> | null = null
 
   const hero = computed(() => state.value.seats[0]!)
+  const swap = computed(() => cheatAvailability(state.value, 0, 'swap-card'))
+
+  function swapCard(cardIndex: number) {
+    try {
+      state.value = applyCheat(state.value, 0, { type: 'swap-card', cardIndex })
+      syncMessage()
+      detail.value = `已随机换牌，花费 ${state.value.seats[0]!.cheatSpent} 筹码。`
+    } catch (error) {
+      detail.value = error instanceof Error ? error.message : '换牌失败'
+    }
+  }
   const legal = computed<LegalActions>(() =>
     state.value.actor === 0 ? legalActions(state.value, 0) : emptyLegal(),
   )
@@ -128,20 +146,20 @@ export function useHoldem(options: HoldemOptions = {}) {
     }
   }
 
-  let newcomerCount = 0
-
   function replaceBustedAi(current: TableState): TableState {
+    const names = new Set(current.seats.map((seat) => seat.name))
     return {
       ...current,
-      seats: current.seats.map((seat) =>
-        seat.isHero || seat.stack > 0
-          ? seat
-          : {
-              ...seat,
-              name: `新玩家 ${++newcomerCount}`,
-              stack: 1000 + Math.floor(Math.random() * 4001),
-            },
-      ),
+      seats: current.seats.map((seat) => {
+        if (seat.isHero || seat.stack > 0) return seat
+        const name = randomNpcName(names)
+        names.add(name)
+        return {
+          ...seat,
+          name,
+          stack: 1000 + Math.floor(Math.random() * 4001),
+        }
+      }),
     }
   }
 
@@ -213,7 +231,7 @@ export function useHoldem(options: HoldemOptions = {}) {
     timer = setTimeout(() => {
       timer = null
       if (paused?.value) return
-      const snapshot = state.value
+      let snapshot = state.value
       if (
         snapshot.handNo !== expectedHand ||
         snapshot.street !== expectedStreet ||
@@ -224,6 +242,12 @@ export function useHoldem(options: HoldemOptions = {}) {
       const profile = AI_PROFILES[actor - 1] ?? AI_PROFILES[0]!
       let action: Action
       try {
+        if (cheatAvailability(snapshot, actor, 'swap-card').allowed && Math.random() < 0.25) {
+          snapshot = applyCheat(snapshot, actor, {
+            type: 'swap-card',
+            cardIndex: Math.floor(Math.random() * 2),
+          })
+        }
         action = chooseAction(snapshot, actor, profile)
         state.value = applyAction(snapshot, actor, action)
       } catch {
@@ -269,6 +293,8 @@ export function useHoldem(options: HoldemOptions = {}) {
     detail,
     thinkingSeat,
     hero,
+    swap,
+    swapCard,
     legal,
     isHeroTurn,
     inHand,

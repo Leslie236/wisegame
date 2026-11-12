@@ -99,6 +99,8 @@ export function createTable(config: TableConfig): TableState {
     lastAction: null,
     hasActed: false,
     canRaise: true,
+    cheatsUsed: [],
+    cheatSpent: 0,
   }))
   return {
     seats,
@@ -131,6 +133,8 @@ export function startHand(state: TableState, deck?: Card[]): TableState {
     lastAction: null,
     hasActed: false,
     canRaise: true,
+    cheatsUsed: [],
+    cheatSpent: 0,
   }))
   const players = seats.filter((seat) => seat.stack > 0)
   if (players.length < 2) throw new Error('至少需要两名有筹码的玩家')
@@ -389,7 +393,8 @@ function settleUncontested(state: TableState): TableState {
   const potTotal = state.seats.reduce((sum, seat) => sum + seat.totalBet, 0)
   const awards: Record<number, number> = { [winner.id]: potTotal }
   const net: Record<number, number> = {}
-  for (const seat of state.seats) net[seat.id] = (awards[seat.id] ?? 0) - seat.totalBet
+  for (const seat of state.seats)
+    net[seat.id] = (awards[seat.id] ?? 0) - seat.totalBet - seat.cheatSpent
   const seats = state.seats.map<Seat>((seat) => ({
     ...seat,
     stack: seat.stack + (awards[seat.id] ?? 0),
@@ -447,7 +452,8 @@ function showdown(state: TableState): TableState {
   }
 
   const net: Record<number, number> = {}
-  for (const seat of state.seats) net[seat.id] = (awards[seat.id] ?? 0) - seat.totalBet
+  for (const seat of state.seats)
+    net[seat.id] = (awards[seat.id] ?? 0) - seat.totalBet - seat.cheatSpent
   const seats = state.seats.map<Seat>((seat) => ({
     ...seat,
     stack: seat.stack + (awards[seat.id] ?? 0),

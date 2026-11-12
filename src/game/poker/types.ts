@@ -3,6 +3,8 @@ import type { Card } from '@/game/cards'
 export type Street = 'idle' | 'preflop' | 'flop' | 'turn' | 'river' | 'showdown' | 'complete'
 export type SeatStatus = 'active' | 'folded' | 'all-in' | 'out'
 export type ActionType = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'all-in'
+export type CheatAction = { type: 'swap-card'; cardIndex: number }
+export type CheatType = CheatAction['type']
 
 export interface Seat {
   id: number
@@ -18,6 +20,8 @@ export interface Seat {
   lastAction: ActionType | null
   hasActed: boolean
   canRaise: boolean
+  cheatsUsed: CheatType[]
+  cheatSpent: number
 }
 
 export type Action =

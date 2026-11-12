@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import PokerActionBar from '@/components/poker/PokerActionBar.vue'
+import PokerCheats from '@/components/poker/PokerCheats.vue'
 import PokerRulesModal from '@/components/poker/PokerRulesModal.vue'
 import PokerTable from '@/components/poker/PokerTable.vue'
 import WalletPanel from '@/components/WalletPanel.vue'
@@ -17,6 +18,9 @@ const {
   detail,
   thinkingSeat,
   legal,
+  hero,
+  swap,
+  swapCard,
   isHeroTurn,
   inHand,
   handComplete,
@@ -122,6 +126,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
           <small>{{ detail }}</small>
         </div>
         <p class="poker-shortcuts">F 弃牌 · C 过牌/跟注 · R 加注 · A 全下</p>
+        <PokerCheats v-if="inHand" :seat="hero" :availability="swap" @swap="swapCard" />
       </div>
 
       <aside class="sidebar">

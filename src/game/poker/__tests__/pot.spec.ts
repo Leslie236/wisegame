@@ -16,6 +16,8 @@ function seat(id: number, totalBet: number, status: SeatStatus = 'active'): Seat
     lastAction: null,
     hasActed: true,
     canRaise: true,
+    cheatsUsed: [],
+    cheatSpent: 0,
   }
 }
 

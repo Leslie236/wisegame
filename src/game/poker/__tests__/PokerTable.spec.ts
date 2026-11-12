@@ -21,6 +21,8 @@ function seat(id: number, name: string, hole: Card[], options: Partial<Seat> = {
     lastAction: null,
     hasActed: true,
     canRaise: true,
+    cheatsUsed: [],
+    cheatSpent: 0,
     ...options,
   }
 }
